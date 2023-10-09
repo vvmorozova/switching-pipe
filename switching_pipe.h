@@ -6,5 +6,6 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <gst/gst.h>
+#include <glib.h>
 
 #endif

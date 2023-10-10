@@ -3,14 +3,18 @@
 static GMainLoop *loop;
 
 typedef struct PipelineData {
-  GstElement *pipeline;
-  GstElement *file;
-  GstElement *bin;
-  GstElement *conv;
-  GstElement *file1;
-  GstElement *bin1;
-  GstElement *conv1;
-  GstElement *sink;
+	GstElement	*pipeline;
+	GstElement *file;
+	GstElement *bin;
+	GstElement *conv;
+	GstElement *file1;
+	GstElement *bin1;
+	GstElement *conv1;
+	GstElement *capsfilter1;
+	GstElement *sink;
+	GstElement *rate1;
+	GstElement *queue1;
+	GstElement	*rtsp;
 } PipeData;
 
 gboolean is_source1_active = 1;
@@ -67,7 +71,7 @@ static gboolean switch_sources(gpointer data) {
     // Изменяем источник видео путем переключения между двумя filesrc элементами
     GstElement *filesrc1 = gst_bin_get_by_name(GST_BIN(pipeline), "file_src");
     GstElement *filesrc2 = gst_bin_get_by_name(GST_BIN(pipeline), "file_src_1");
-  	is_source1_active = GST_ELEMENT(filesrc1)->current_state == GST_STATE_PLAYING;
+  	is_source1_active = !is_source1_active;
 
     if (is_source1_active) {
         gst_element_set_state(filesrc1, GST_STATE_NULL);
@@ -87,10 +91,15 @@ int main(int argc, char **argv) {
 	GstMessage *msg;
 	int			switch_time = 0;
 	gboolean terminate = FALSE;
+	GstCaps *caps;
 	//проверка на правильность агрументов
 	//адрес сервера, путь к файлу, интервал переключения
 
+	// gst_caps_set_value(caps, "framerate", "30/1");
 	gst_init(&argc, &argv);
+
+	caps = gst_caps_new_simple ("video/x-raw",
+      "framerate", GST_TYPE_FRACTION, 3, 1, NULL);
 	if (argc < 4) {
 		printf("Недостаточно аргументов.\n"); //стоит написать в каком порядке?
 		exit(0);
@@ -104,77 +113,68 @@ int main(int argc, char **argv) {
 		printf("no pipe created\n");
 		return 1;
 	}
-
-	// rtsp = gst_element_factory_make("rtspsrc", NULL);
+	data.rtsp = gst_element_factory_make("rtspsrc", "rtsp_src");
 	data.file = gst_element_factory_make("filesrc", "file_src");
 	data.file1 = gst_element_factory_make("filesrc", "file_src_1");
 	data.bin = gst_element_factory_make("decodebin", "decode_bin");
 	data.bin1 = gst_element_factory_make("decodebin", "decode_bin1");
-	data.sink = gst_element_factory_make("ximagesink", "sink");
-	data.conv = gst_element_factory_make("videoconvert", "conv");
-	data.conv1 = gst_element_factory_make("videoconvert", "conv1");
-	if (!data.pipeline || !data.file || !data.file1 || !data.bin || !data.conv || !data.sink) {
+	data.sink = gst_element_factory_make("xvimagesink", "sink"); 
+	data.conv = gst_element_factory_make("autovideoconvert", "conv");
+	data.conv1 = gst_element_factory_make("autovideoconvert", "conv1");
+	data.queue1 = gst_element_factory_make("queue", "queue1");
+	if (!data.pipeline || !data.file || !data.file1 || !data.bin || !data.conv || !data.bin1 || !data.conv1 || !data.sink|| !data.queue1 || !data.rtsp) {
         g_print("One or more elements could not be created. Exiting.\n");
         return -1;
     }
-	gst_util_set_object_arg (G_OBJECT(data.file), "location", argv[2]);
+	gst_util_set_object_arg (G_OBJECT(data.file), "location", argv[1]);
+	gst_util_set_object_arg (G_OBJECT(data.rtsp), "location", argv[2]);
 	gst_util_set_object_arg (G_OBJECT(data.file1), "location", argv[1]);
+	gst_util_set_object_arg (G_OBJECT(data.file1), "do-timestamp ", "true");
+
 	printf("arguments are set\n");
 
-	gst_bin_add_many(GST_BIN(data.pipeline), data.file1, data.bin1, data.conv1, data.file, data.bin, data.conv, data.sink, NULL);
+	gst_bin_add_many(GST_BIN(data.pipeline), data.file1, data.bin1, data.conv1, data.file, data.bin, data.conv, data.sink, data.queue1, data.rtsp, NULL);
 	GST_ERROR("elements added to bin\n");
 
 
 	if (is_source1_active) {
 		if (!gst_element_link(data.file1, data.bin1))
 			GST_ERROR("no link 12");
+		// GstPad* rate_src_pad = gst_element_get_static_pad(data.rate1, "src");
+		// // gst_pad_push_event (rate_src_pad, gst_event_new_caps (caps));
+		// gst_pad_set_caps(rate_src_pad, caps);
+
+		// if (!gst_element_link(data.queue1, data.bin1))
+			// GST_ERROR("no link 22");
+
+		// if (!gst_element_link(data.capsfilter1, data.bin1))
+		// 	GST_ERROR("no link 34");
+
 		if (!gst_element_link(data.conv1, data.sink))
-			GST_ERROR("no link 34");
+			GST_ERROR("no link 45");
 		g_signal_connect (data.bin1, "pad-added", G_CALLBACK (pad_added_handler), &data);
 		gst_element_set_state(data.file, GST_STATE_NULL);
 		gst_element_set_state(data.bin, GST_STATE_NULL);
 		gst_element_set_state(data.conv, GST_STATE_NULL);
-		gst_element_set_state(data.file1, GST_STATE_PLAYING);
+		// gst_element_set_state(data.file1, GST_STATE_PLAYING);
+		gst_element_set_state(data.rtsp, GST_STATE_PLAYING);
 		gst_element_set_state(data.bin1, GST_STATE_PLAYING);
 		gst_element_set_state(data.conv1, GST_STATE_PLAYING);
 		gst_element_set_state(data.sink, GST_STATE_PLAYING);
 	}
-	else {
-		if (!gst_element_link(data.file, data.bin))
-			GST_ERROR("no link 12");
-		if (!gst_element_link(data.conv, data.sink))
-			GST_ERROR("no link 34");
-		g_signal_connect (data.bin, "pad-added", G_CALLBACK (pad_added_handler), &data);
-	}
-
-	// if (gst_element_set_state(data.pipeline,
-	// 		GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
-	// 	g_error ("Pipe is failed to start\n");
-	// 	return 1;
-	// }
-
 	g_timeout_add(switch_time, switch_sources, data.pipeline);
 	if (is_source1_active) {
-		while (!gst_element_link(data.bin1, data.conv1) ) {
-			GST_ERROR("no link 23");
-			g_usleep(100000);
+		while (!gst_element_link(data.bin1, data.conv1)) {
+			GST_WARNING("no link 23");
+			g_usleep(500000);
 		}
+		// gst_element_link(data.bin1, data.capsfilter1);
 		gst_element_set_state(data.file1, GST_STATE_PLAYING);
 		GstPad* src_pad = gst_element_get_static_pad(data.file1, "src");
 		gst_pad_activate_mode (src_pad, GST_PAD_MODE_PUSH, TRUE);
 	}
-	else {
-		while (!gst_element_link(data.bin, data.conv)) {
-			GST_ERROR("no link 23");
-			g_usleep(100000);
-		}
-		GstPad* src_pad = gst_element_get_static_pad(data.file, "src");
-		gst_element_set_state(data.file, GST_STATE_PLAYING);
-		gst_pad_activate_mode (src_pad, GST_PAD_MODE_PUSH, TRUE);
-	}
-	
 	GST_DEBUG_BIN_TO_DOT_FILE(data.pipeline, GST_DEBUG_GRAPH_SHOW_ALL, "pipeline");
-
+	GST_WARNING("Running ...\n");
 	loop = g_main_loop_new(NULL, FALSE);
     g_main_loop_run(loop);
 

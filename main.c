@@ -117,11 +117,11 @@ int main(int argc, char **argv) {
         g_print("One or more elements could not be created. Exiting.\n");
         return -1;
     }
-	// gst_util_set_object_arg (G_OBJECT(data.file), "location", argv[2]);
+	gst_util_set_object_arg (G_OBJECT(data.file), "location", argv[2]);
 	gst_util_set_object_arg (G_OBJECT(data.file1), "location", argv[1]);
 	printf("arguments are set\n");
 
-	gst_bin_add_many(GST_BIN(data.pipeline), data.file1, data.bin1, data.conv1, data.sink, NULL);
+	gst_bin_add_many(GST_BIN(data.pipeline), data.file1, data.bin1, data.conv1, data.file, data.bin, data.conv, data.sink, NULL);
 	GST_ERROR("elements added to bin\n");
 
 
@@ -131,24 +131,31 @@ int main(int argc, char **argv) {
 		if (!gst_element_link(data.conv1, data.sink))
 			GST_ERROR("no link 34");
 		g_signal_connect (data.bin1, "pad-added", G_CALLBACK (pad_added_handler), &data);
+		gst_element_set_state(data.file, GST_STATE_NULL);
+		gst_element_set_state(data.bin, GST_STATE_NULL);
+		gst_element_set_state(data.conv, GST_STATE_NULL);
+		gst_element_set_state(data.file1, GST_STATE_PLAYING);
+		gst_element_set_state(data.bin1, GST_STATE_PLAYING);
+		gst_element_set_state(data.conv1, GST_STATE_PLAYING);
+		gst_element_set_state(data.sink, GST_STATE_PLAYING);
 	}
-	// else {
-	// 	if (!gst_element_link(data.file, data.bin))
-	// 		GST_ERROR("no link 12");
-	// 	if (!gst_element_link(data.conv, data.sink))
-	// 		GST_ERROR("no link 34");
-	// 	g_signal_connect (data.bin, "pad-added", G_CALLBACK (pad_added_handler), &data);
+	else {
+		if (!gst_element_link(data.file, data.bin))
+			GST_ERROR("no link 12");
+		if (!gst_element_link(data.conv, data.sink))
+			GST_ERROR("no link 34");
+		g_signal_connect (data.bin, "pad-added", G_CALLBACK (pad_added_handler), &data);
+	}
+
+	// if (gst_element_set_state(data.pipeline,
+	// 		GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
+	// 	g_error ("Pipe is failed to start\n");
+	// 	return 1;
 	// }
 
-	if (gst_element_set_state(data.pipeline,
-			GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
-		g_error ("Pipe is failed to start\n");
-		return 1;
-	}
-
+	g_timeout_add(switch_time, switch_sources, data.pipeline);
 	if (is_source1_active) {
-		GstPad* bin_src_pad = gst_element_get_static_pad(data.bin1, "src");
-		while (!gst_element_link(data.bin1, data.conv1) && !gst_pad_is_linked (bin_src_pad)) {
+		while (!gst_element_link(data.bin1, data.conv1) ) {
 			GST_ERROR("no link 23");
 			g_usleep(100000);
 		}
@@ -156,19 +163,18 @@ int main(int argc, char **argv) {
 		GstPad* src_pad = gst_element_get_static_pad(data.file1, "src");
 		gst_pad_activate_mode (src_pad, GST_PAD_MODE_PUSH, TRUE);
 	}
-	// else {
-	// 	while (!gst_element_link(data.bin, data.conv)) {
-	// 		GST_ERROR("no link 23");
-	// 		g_usleep(100000);
-	// 	}
-	// 	GstPad* src_pad = gst_element_get_static_pad(data.file, "src");
-	// 	gst_element_set_state(data.file, GST_STATE_PLAYING);
-	// 	gst_pad_activate_mode (src_pad, GST_PAD_MODE_PUSH, TRUE);
-	// }
+	else {
+		while (!gst_element_link(data.bin, data.conv)) {
+			GST_ERROR("no link 23");
+			g_usleep(100000);
+		}
+		GstPad* src_pad = gst_element_get_static_pad(data.file, "src");
+		gst_element_set_state(data.file, GST_STATE_PLAYING);
+		gst_pad_activate_mode (src_pad, GST_PAD_MODE_PUSH, TRUE);
+	}
 	
 	GST_DEBUG_BIN_TO_DOT_FILE(data.pipeline, GST_DEBUG_GRAPH_SHOW_ALL, "pipeline");
 
-	g_timeout_add(switch_time, switch_sources, data.pipeline);
 	loop = g_main_loop_new(NULL, FALSE);
     g_main_loop_run(loop);
 

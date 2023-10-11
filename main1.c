@@ -11,6 +11,10 @@ typedef struct PipelineData {
 	GstElement *sink;
 } PipeData;
 
+static GstPad *blockpad;
+static GstElement *cur_src;
+static GstElement *pipeline;
+PipeData    *g_data;
 gboolean is_source1_active = 1;
 
 static void pad_added_handler (GstElement *src, GstPad *new_pad, PipeData *data) {
@@ -22,8 +26,9 @@ static void pad_added_handler (GstElement *src, GstPad *new_pad, PipeData *data)
 
 	if (is_source1_active)
 		sink_pad = gst_element_get_static_pad (data->conv1, "sink");
-	// else
-	// 	sink_pad = gst_element_get_static_pad (data->conv, "sink");
+	else
+		sink_pad = gst_element_get_static_pad (data->conv, "sink");
+
 	g_print ("Received new pad '%s' from '%s':\n", GST_PAD_NAME (new_pad), GST_ELEMENT_NAME (src));
 
 	/* If our converter is already linked, we have nothing to do here */
@@ -53,29 +58,98 @@ static void pad_added_handler (GstElement *src, GstPad *new_pad, PipeData *data)
 	/* Unreference the new pad's caps, if we got them */
 	if (new_pad_caps != NULL)
 		gst_caps_unref (new_pad_caps);
-
-	/* Unreference the sink pad */
-	gst_object_unref (sink_pad);
+  	
 }
 
+static GstPadProbeReturn
+event_probe_cb (GstPad * pad, GstPadProbeInfo * info, gpointer user_data)
+{
+	GMainLoop *loop = user_data;
+	GstElement *next;
 
-static gboolean switch_sources(gpointer data) {
-    GstElement *pipeline = GST_ELEMENT(data);
+	is_source1_active = !is_source1_active;
+	if (GST_EVENT_TYPE (GST_PAD_PROBE_INFO_DATA (info)) != GST_EVENT_EOS)
+		return GST_PAD_PROBE_OK;
 
-    // Изменяем источник видео путем переключения между двумя filesrc элементами
-    GstElement *filesrc1 = gst_bin_get_by_name(GST_BIN(pipeline), "file_src");
-    GstElement *filesrc2 = gst_bin_get_by_name(GST_BIN(pipeline), "file_src_1");
-  	is_source1_active = !is_source1_active;
+	gst_pad_remove_probe (pad, GST_PAD_PROBE_INFO_ID (info));
 
-    if (is_source1_active) {
-        gst_element_set_state(filesrc1, GST_STATE_NULL);
-        gst_element_set_state(filesrc2, GST_STATE_PLAYING);
-    } else {
-        gst_element_set_state(filesrc1, GST_STATE_PLAYING);
-        gst_element_set_state(filesrc2, GST_STATE_NULL);
-    }
+	/* take next effect from the queue */
+	// next = g_queue_pop_head (&effects);
+	// if (next == NULL) {
+	// 	GST_DEBUG_OBJECT (pad, "no more effects");
+	// 	g_main_loop_quit (loop);
+	// 	return GST_PAD_PROBE_DROP;
+	// }
 
-    return G_SOURCE_CONTINUE;
+	// g_print ("Switching from '%s' to '%s'..\n", GST_OBJECT_NAME (cur_src),
+	// 	GST_OBJECT_NAME (next));
+
+
+	gst_element_set_state (cur_src, GST_STATE_NULL);
+	
+	gst_element_unlink(cur_src, g_data->sink);
+	// if (is_source1_active) {
+	// 	gst_element_set_state (cur_src, GST_STATE_NULL);
+	// }
+		/* remove unlinks automatically */
+	//   GST_DEBUG_OBJECT (pipeline, "removing %" GST_PTR_FORMAT, cur_src);
+	//   gst_bin_remove (GST_BIN (pipeline), cur_src);
+
+	/* push current effect back into the queue */
+	//   g_queue_push_tail (&effects, g_steal_pointer (&cur_src));
+
+	/* add, link and start the new effect */
+	//   GST_DEBUG_OBJECT (pipeline, "adding   %" GST_PTR_FORMAT, next);
+	//   gst_bin_add (GST_BIN (pipeline), next);
+
+	
+	GST_DEBUG_OBJECT (pipeline, "linking..");
+	// gst_element_link_many (conv_before, next, conv_after, NULL);
+	if (is_source1_active)
+		cur_src = g_data->conv;
+	else
+		cur_src = g_data->conv1;
+	gst_element_set_state(cur_src, GST_STATE_PLAYING);
+
+	// cur_src = next;
+	GST_DEBUG_OBJECT (pipeline, "done");
+
+	return GST_PAD_PROBE_DROP;
+}
+
+static GstPadProbeReturn
+pad_probe_cb (GstPad * pad, GstPadProbeInfo * info, gpointer user_data)
+{
+  GstPad *srcpad, *sinkpad;
+  GstElement *conv1 = gst_bin_get_by_name(GST_BIN(pipeline), "conv1");
+
+  GST_DEBUG_OBJECT (pad, "pad is blocked now");
+
+  /* remove the probe first */
+  gst_pad_remove_probe (pad, GST_PAD_PROBE_INFO_ID (info));
+
+  /* install new probe for EOS */
+  srcpad = gst_element_get_static_pad (cur_src, "src");
+  gst_pad_add_probe (srcpad, GST_PAD_PROBE_TYPE_BLOCK |
+	  GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, event_probe_cb, user_data, NULL);
+  gst_object_unref (srcpad);
+
+  /* push EOS into the element, the probe will be fired when the
+   * EOS leaves the effect and it has thus drained all of its data */
+  sinkpad = gst_element_get_static_pad (conv1, "sink");
+  gst_pad_send_event (sinkpad, gst_event_new_eos ());
+  gst_object_unref (sinkpad);
+
+  return GST_PAD_PROBE_OK;
+}
+
+static gboolean
+timeout_cb (gpointer user_data)
+{
+	gst_pad_add_probe (blockpad, GST_PAD_PROBE_TYPE_BLOCK_DOWNSTREAM,
+			pad_probe_cb, user_data, NULL);
+
+  return TRUE;
 }
 
 int main(int argc, char **argv) {
@@ -105,68 +179,67 @@ int main(int argc, char **argv) {
 		printf("no pipe created\n");
 		return 1;
 	}
+	pipeline = data.pipeline;
+	g_data = &data;
 	data.bin = gst_element_factory_make("uridecodebin", "uridecode_bin");
 	data.bin1 = gst_element_factory_make("uridecodebin", "uridecode_bin1");
 	data.sink = gst_element_factory_make("xvimagesink", "sink"); 
 	data.conv = gst_element_factory_make("autovideoconvert", "conv");
 	data.conv1 = gst_element_factory_make("autovideoconvert", "conv1");
+	cur_src = data.conv;
 	if (!data.pipeline || !data.bin || !data.conv || !data.bin1 || !data.conv1 || !data.sink) {
-        g_print("One or more elements could not be created. Exiting.\n");
-        return -1;
-    }
-    char *uri, *tmp;
-    char* path = realpath(argv[2], NULL);
-    if(path == NULL){
-        printf("cannot find file with name[%s]\n", argv[2]);
-        return 0;
-    } else{
-        printf("path[%s]\n", path);
-        // free(path);
-    }
-    GST_ERROR("Write uri\n");
-    uri = (char *)malloc(strlen("file://") + strlen(path) + 1);
-    strcpy(uri, "file://");
-    strcat(uri, path);
-    GST_ERROR("uri = %s\n", uri);
-	
-    gst_util_set_object_arg (G_OBJECT(data.bin1), "uri", uri);
-    gst_util_set_object_arg (G_OBJECT(data.bin), "uri", argv[1]);
+		g_print("One or more elements could not be created. Exiting.\n");
+		return -1;
+	}
+	// Сборка uri для файла
+	char *uri, *tmp;
+	char* path = realpath(argv[2], NULL);
+	if(path == NULL){
+		printf("cannot find file with name[%s]\n", argv[2]);
+		return 0;
+	} else{
+		printf("path[%s]\n", path);
+	}
+	GST_ERROR("Write uri\n");
+	uri = (char *)malloc(strlen("file://") + strlen(path) + 1);
+	strcpy(uri, "file://");
+	strcat(uri, path);
+	GST_ERROR("uri = %s\n", uri);
+
+	gst_util_set_object_arg (G_OBJECT(data.bin1), "uri", uri);
+	gst_util_set_object_arg (G_OBJECT(data.bin), "uri", argv[1]);
 	printf("arguments are set\n");
 
-	gst_bin_add_many(GST_BIN(data.pipeline), data.bin1, data.conv1, data.sink, NULL);
+	blockpad = gst_element_get_static_pad(data.conv1, "src");
+
+	gst_bin_add_many(GST_BIN(data.pipeline), data.bin1, data.conv1, data.bin, data.conv, data.sink, NULL);
 	GST_ERROR("elements added to bin\n");
+	
+	if (!gst_element_link(data.conv1, data.sink))
+		GST_ERROR("no link 45");
 
+	g_signal_connect (data.bin1, "pad-added", G_CALLBACK (pad_added_handler), &data);
+	
+	gst_element_set_state(data.pipeline, GST_STATE_PLAYING);
+	
+	GstPad* bin1_src_pad = gst_element_get_static_pad(data.bin1, "src");
+	gst_pad_activate_mode (bin1_src_pad, GST_PAD_MODE_PUSH, TRUE);
+	gst_element_link(data.bin1, data.conv1);
 
-	if (is_source1_active) {
-		// if (!gst_element_link(data.file1, data.bin1))
-			GST_ERROR("no link 12");
-		
-		if (!gst_element_link(data.conv1, data.sink))
-			GST_ERROR("no link 45");
-		g_signal_connect (data.bin1, "pad-added", G_CALLBACK (pad_added_handler), &data);
-		gst_element_set_state(data.bin, GST_STATE_NULL);
-		gst_element_set_state(data.conv, GST_STATE_NULL);
-		gst_element_set_state(data.bin1, GST_STATE_PLAYING);
-		gst_element_set_state(data.conv1, GST_STATE_PLAYING);
-		// gst_element_set_state(data.sink, GST_STATE_PLAYING);
-		gst_element_set_state(data.pipeline, GST_STATE_PLAYING);
-	}
-	// g_timeout_add(switch_time, switch_sources, data.pipeline);
-	if (is_source1_active) {
-		gst_element_set_state(data.bin1, GST_STATE_PLAYING);
-        GstPad* bin1_src_pad = gst_element_get_static_pad(data.bin1, "src");
-		gst_pad_activate_mode (bin1_src_pad, GST_PAD_MODE_PUSH, TRUE);
-        gst_element_link(data.bin1, data.conv1);
-        gst_element_set_state(data.pipeline, GST_STATE_PLAYING);
-		// gst_element_link(data.bin1, data.capsfilter1);
-		// gst_element_link(data.bin1, data.conv1);
-	    GST_DEBUG_BIN_TO_DOT_FILE(data.pipeline, GST_DEBUG_GRAPH_SHOW_ALL, "pipeline");
-		}
-	GST_WARNING("Running ...\n");
+	GstPad* bin_src_pad = gst_element_get_static_pad(data.bin, "src");
+	gst_pad_activate_mode (bin_src_pad, GST_PAD_MODE_PUSH, TRUE);
+	gst_element_link(data.bin, data.conv);
+
+	// Рисовать картинку для дебага
+	GST_DEBUG_BIN_TO_DOT_FILE(data.pipeline, GST_DEBUG_GRAPH_SHOW_ALL, "pipeline");
+
+	g_timeout_add_seconds(5, timeout_cb, loop);
 	loop = g_main_loop_new(NULL, FALSE);
-    g_main_loop_run(loop);
+	g_main_loop_run(loop);
+
 
 	gst_element_set_state(data.pipeline, GST_STATE_NULL);
-    gst_object_unref(GST_OBJECT(data.pipeline));
-    g_main_loop_unref(loop);
+	gst_object_unref (blockpad);
+	gst_object_unref(GST_OBJECT(data.pipeline));
+	g_main_loop_unref(loop);
 }

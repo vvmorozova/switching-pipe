@@ -157,20 +157,26 @@ int main(int argc, char **argv) {
 		gst_element_set_state(data.bin, GST_STATE_NULL);
 		gst_element_set_state(data.conv, GST_STATE_NULL);
 		// gst_element_set_state(data.file1, GST_STATE_PLAYING);
-		gst_element_set_state(data.rtsp, GST_STATE_PLAYING);
-		gst_element_set_state(data.bin1, GST_STATE_PLAYING);
-		gst_element_set_state(data.conv1, GST_STATE_PLAYING);
-		gst_element_set_state(data.sink, GST_STATE_PLAYING);
+		// // // gst_element_set_state(data.rtsp, GST_STATE_PLAYING);
+		// gst_element_set_state(data.bin1, GST_STATE_PLAYING);
+		// gst_element_set_state(data.conv1, GST_STATE_PLAYING);
+		// gst_element_set_state(data.sink, GST_STATE_PLAYING);
+		gst_element_set_state(data.pipeline, GST_STATE_PLAYING);
 	}
 	g_timeout_add(switch_time, switch_sources, data.pipeline);
 	if (is_source1_active) {
+		gst_element_set_state(data.bin1, GST_STATE_PLAYING);
 		while (!gst_element_link(data.bin1, data.conv1)) {
 			GST_WARNING("no link 23");
 			g_usleep(500000);
 		}
+		
 		// gst_element_link(data.bin1, data.capsfilter1);
-		gst_element_set_state(data.file1, GST_STATE_PLAYING);
+		// gst_element_link(data.bin1, data.conv1);
+		// gst_element_set_state(data.file1, GST_STATE_PLAYING);
 		GstPad* src_pad = gst_element_get_static_pad(data.file1, "src");
+		gst_pad_activate_mode (src_pad, GST_PAD_MODE_PUSH, TRUE);
+		GstPad* bin1_src_pad = gst_element_get_static_pad(data.bin1, "sink");
 		gst_pad_activate_mode (src_pad, GST_PAD_MODE_PUSH, TRUE);
 	}
 	GST_DEBUG_BIN_TO_DOT_FILE(data.pipeline, GST_DEBUG_GRAPH_SHOW_ALL, "pipeline");

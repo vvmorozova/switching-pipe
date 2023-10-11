@@ -33,5 +33,5 @@ re: fclean all
 graph:
 	dot -Tpng debug-pics/pipeline.dot > debug-pics/out.png
 run:
-	rm debug-pics/pipeline.dot; export GST_DEBUG_DUMP_DOT_DIR=/home/morozovavv/Documents/switching-pipe/debug-pics; GST_DEBUG=3 ./switching_pipe puppy.mp4 kitten.mp4 5
+	rm debug-pics/pipeline.dot; export GST_DEBUG_DUMP_DOT_DIR=/home/morozovavv/Documents/switching-pipe/debug-pics; GST_DEBUG=3 ./switching_pipe rtsp://192.169.0.200/stream0 kitten.mp4 50
 .PHONY : all, clean, fclean, re

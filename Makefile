@@ -1,6 +1,6 @@
-FILES	= main.c
+FILES	= main1.c
 # -Werror
-FLAGS	= -Wall -Wextra `pkg-config --cflags --libs gstreamer-1.0`
+FLAGS	= -Wall -Wextra `pkg-config --cflags --libs gstreamer-1.0 ` 
 
 NAME	= switching_pipe
 
@@ -30,5 +30,8 @@ fclean: clean
 	@echo "All deleted"
 
 re: fclean all
-
+graph:
+	dot -Tpng debug-pics/pipeline.dot > debug-pics/out.png
+run:
+	rm debug-pics/pipeline.dot; export GST_DEBUG_DUMP_DOT_DIR=/home/morozovavv/Documents/switching-pipe/debug-pics; GST_DEBUG=3 ./switching_pipe puppy.mp4 kitten.mp4 5
 .PHONY : all, clean, fclean, re
